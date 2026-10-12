@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui
+  labels: { app: ui }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: ui }
+  template:
+    metadata:
+      labels: { app: ui }
+    spec:
+      containers:
+        - name: ui
+          image: xdb/ui:latest
+          ports: [{ containerPort: 8080 }]
+          env:
+            - { name: API_GATEWAY_HOST, value: api-gateway }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+spec:
+  selector: { app: ui }
+  ports: [{ port: 8080, targetPort: 8080 }]

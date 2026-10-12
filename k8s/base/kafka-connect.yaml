@@ -1,0 +1,54 @@
+# Kafka Connect in distributed mode: workers share the xdb-connect group. Connector configs,
+# source offsets (WAL LSN / Oracle SCN / SQL Server LSN) and statuses live in Kafka topics,
+# so a worker can die and its Debezium task restarts on another one where it left off.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-connect
+  labels: { app: kafka-connect }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: kafka-connect }
+  template:
+    metadata:
+      labels: { app: kafka-connect }
+    spec:
+      serviceAccountName: kafka-connect
+      containers:
+        - name: connect
+          image: xdb/kafka-connect:latest
+          ports: [{ containerPort: 8083 }]
+          env:
+            - name: BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: xdb-config, key: KAFKA_BOOTSTRAP_SERVERS } }
+            - { name: GROUP_ID, value: xdb-connect }
+            - { name: CONFIG_STORAGE_TOPIC, value: xdb_connect_configs }
+            - { name: OFFSET_STORAGE_TOPIC, value: xdb_connect_offsets }
+            - { name: STATUS_STORAGE_TOPIC, value: xdb_connect_statuses }
+            - { name: CONFIG_STORAGE_REPLICATION_FACTOR, value: "3" }
+            - { name: OFFSET_STORAGE_REPLICATION_FACTOR, value: "3" }
+            - { name: STATUS_STORAGE_REPLICATION_FACTOR, value: "3" }
+            - { name: CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY, value: All }
+            # Workers advertise their pod IP so the REST API forwards requests to the leader.
+            - name: CONNECT_REST_ADVERTISED_HOST_NAME
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            # AWS Secrets Manager ConfigProvider: resolves ${aws:<secret>} placeholders in connector configs.
+            - { name: CONNECT_CONFIG_PROVIDERS, value: aws }
+            - { name: CONNECT_CONFIG_PROVIDERS_AWS_CLASS, value: io.lenses.connect.secrets.providers.AWSSecretProvider }
+            - { name: CONNECT_CONFIG_PROVIDERS_AWS_PARAM_AWS_AUTH_METHOD, value: default }
+            - { name: HEAP_OPTS, value: "-Xms1g -Xmx2g" }
+          readinessProbe:
+            httpGet: { path: /connectors, port: 8083 }
+            initialDelaySeconds: 30
+          resources:
+            requests: { cpu: 500m, memory: 2560Mi }
+            limits: { memory: 2560Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-connect
+spec:
+  selector: { app: kafka-connect }
+  ports: [{ port: 8083, targetPort: 8083 }]

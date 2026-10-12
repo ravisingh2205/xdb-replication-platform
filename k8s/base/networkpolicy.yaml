@@ -1,0 +1,30 @@
+# subscription-service: only the gateway and the apply-service may call it
+# (the apply-service needs /internal/** for target credentials in "remote" mode).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: subscription-service-ingress
+spec:
+  podSelector:
+    matchLabels: { app: subscription-service }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: api-gateway } }
+        - podSelector: { matchLabels: { app: apply-service } }
+      ports: [{ port: 8082 }]
+---
+# Kafka Connect's REST API can create connectors: only publication-service may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-connect-ingress
+spec:
+  podSelector:
+    matchLabels: { app: kafka-connect }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: publication-service } }
+        - podSelector: { matchLabels: { app: kafka-connect } }
+      ports: [{ port: 8083 }]

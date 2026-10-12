@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xdb-config
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "<msk_bootstrap_brokers_sasl_iam>"
+  METADATA_DB_URL: "jdbc:postgresql://<rds_endpoint>:5432/xdb_metadata?sslmode=require"
+  SPRING_PROFILES_ACTIVE: "aws"
+  XDB_SECRETS_PROVIDER: "aws"
+  XDB_CDC_PARTITIONS: "6"
+  XDB_CDC_REPLICATION_FACTOR: "3"
+  XDB_CONFIG_REPLICATION_FACTOR: "3"
+  XDB_DLQ_REPLICATION_FACTOR: "3"
+  XDB_SECURITY_ENABLED: "true"
+  XDB_JWT_ISSUER_URI: "https://cognito-idp.<region>.amazonaws.com/<user_pool_id>"

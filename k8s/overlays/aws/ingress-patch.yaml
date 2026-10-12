@@ -1,0 +1,6 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: xdb-console
+  annotations:
+    alb.ingress.kubernetes.io/certificate-arn: <acm_certificate_arn>

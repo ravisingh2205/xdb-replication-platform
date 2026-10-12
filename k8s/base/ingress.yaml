@@ -1,0 +1,22 @@
+# AWS Load Balancer Controller provisions an internet-facing ALB with an ACM certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: xdb-console
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: api-gateway, port: { number: 8080 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: ui, port: { number: 8080 } } }

@@ -1,0 +1,25 @@
+# MSK with IAM auth: worker, Debezium producer and admin clients all use SASL/IAM over TLS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-connect
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: connect
+          env:
+            - { name: CONNECT_SECURITY_PROTOCOL, value: SASL_SSL }
+            - { name: CONNECT_SASL_MECHANISM, value: AWS_MSK_IAM }
+            - { name: CONNECT_SASL_JAAS_CONFIG, value: "software.amazon.msk.auth.iam.IAMLoginModule required;" }
+            - { name: CONNECT_SASL_CLIENT_CALLBACK_HANDLER_CLASS, value: software.amazon.msk.auth.iam.IAMClientCallbackHandler }
+            - { name: CONNECT_PRODUCER_SECURITY_PROTOCOL, value: SASL_SSL }
+            - { name: CONNECT_PRODUCER_SASL_MECHANISM, value: AWS_MSK_IAM }
+            - { name: CONNECT_PRODUCER_SASL_JAAS_CONFIG, value: "software.amazon.msk.auth.iam.IAMLoginModule required;" }
+            - { name: CONNECT_PRODUCER_SASL_CLIENT_CALLBACK_HANDLER_CLASS, value: software.amazon.msk.auth.iam.IAMClientCallbackHandler }
+            - { name: CONNECT_ADMIN_SECURITY_PROTOCOL, value: SASL_SSL }
+            - { name: CONNECT_ADMIN_SASL_MECHANISM, value: AWS_MSK_IAM }
+            - { name: CONNECT_ADMIN_SASL_JAAS_CONFIG, value: "software.amazon.msk.auth.iam.IAMLoginModule required;" }
+            - { name: CONNECT_ADMIN_SASL_CLIENT_CALLBACK_HANDLER_CLASS, value: software.amazon.msk.auth.iam.IAMClientCallbackHandler }
+            - { name: CONNECT_CONFIG_PROVIDERS_AWS_PARAM_AWS_REGION, value: <region> }

@@ -1,0 +1,90 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: subscription-service
+  datasource:
+    url: ${METADATA_DB_URL:jdbc:postgresql://localhost:5432/xdb_metadata}
+    username: ${METADATA_DB_USER:xdb}
+    password: ${METADATA_DB_PASSWORD:xdb}
+    hikari:
+      schema: subscription
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.default_schema: subscription
+  flyway:
+    schemas: subscription
+    default-schema: subscription
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+
+xdb:
+  outbox:
+    enabled: true
+  secrets:
+    provider: ${XDB_SECRETS_PROVIDER:local}
+    local-key: ${XDB_SECRETS_LOCAL_KEY:change-me-local-dev-key-32chars!!}
+    aws-prefix: ${XDB_SECRETS_AWS_PREFIX:xdb/}
+  subscription:
+    publication-service-url: ${PUBLICATION_SERVICE_URL:http://localhost:8081}
+    internal-token: ${XDB_INTERNAL_TOKEN:local-internal-token}
+    replication-factor: ${XDB_CONFIG_REPLICATION_FACTOR:1}
+
+resilience4j:
+  retry:
+    instances:
+      publicationService:
+        max-attempts: 3
+        wait-duration: 300ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - com.xdb.replication.common.web.ApiExceptions$UpstreamException
+  circuitbreaker:
+    instances:
+      publicationService:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 20s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: aws
+  kafka:
+    security:
+      protocol: SASL_SSL
+    properties:
+      sasl.mechanism: AWS_MSK_IAM
+      sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
+      sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+xdb:
+  secrets:
+    provider: aws
+  subscription:
+    replication-factor: 3

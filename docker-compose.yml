@@ -1,0 +1,145 @@
+# Local end-to-end stack: Kafka (KRaft) + Kafka Connect/Debezium + metadata DB + sample
+# source/target Postgres + the four Spring Boot services + React console + Kafka UI.
+#
+#   docker compose up --build
+#   Console:   http://localhost:3000
+#   Gateway:   http://localhost:8080/api/...
+#   Kafka UI:  http://localhost:8085
+#   Connect:   http://localhost:8083/connectors
+
+x-service-env: &service-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  METADATA_DB_URL: jdbc:postgresql://metadata-db:5432/xdb_metadata
+  METADATA_DB_USER: xdb
+  METADATA_DB_PASSWORD: xdb
+  XDB_SECRETS_LOCAL_KEY: local-dev-only-key-change-me-please
+  XDB_INTERNAL_TOKEN: local-internal-token
+
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    hostname: kafka
+    ports: ["29092:29092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"   # topics are created explicitly, as on MSK
+      CLUSTER_ID: xdb-local-kraft-cluster-01
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      retries: 12
+
+  connect:
+    build: ./docker/connect
+    ports: ["8083:8083"]
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: xdb-connect
+      CONFIG_STORAGE_TOPIC: xdb_connect_configs
+      OFFSET_STORAGE_TOPIC: xdb_connect_offsets
+      STATUS_STORAGE_TOPIC: xdb_connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # Allow per-connector producer.override.* (compression, batching).
+      CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY: All
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8083/connectors >/dev/null"]
+      interval: 10s
+      retries: 18
+
+  metadata-db:
+    image: postgres:16
+    environment: { POSTGRES_DB: xdb_metadata, POSTGRES_USER: xdb, POSTGRES_PASSWORD: xdb }
+    ports: ["5432:5432"]
+    volumes:
+      - ./docker/init/01-metadata.sql:/docker-entrypoint-initdb.d/01-metadata.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xdb -d xdb_metadata"]
+      interval: 5s
+      retries: 20
+
+  source-db:
+    image: postgres:16
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10"]
+    environment: { POSTGRES_DB: orders, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    ports: ["5433:5432"]
+    volumes:
+      - ./docker/init/orders-schema.sql:/docker-entrypoint-initdb.d/orders-schema.sql.tmpl:ro
+      - ./docker/init/10-source.sh:/docker-entrypoint-initdb.d/10-source.sh:ro
+
+  target-db:
+    image: postgres:16
+    environment: { POSTGRES_DB: reporting, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    ports: ["5434:5432"]
+    volumes:
+      - ./docker/init/orders-schema.sql:/docker-entrypoint-initdb.d/orders-schema.sql.tmpl:ro
+      - ./docker/init/20-target.sh:/docker-entrypoint-initdb.d/20-target.sh:ro
+
+  publication-service:
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: publication-service } }
+    ports: ["8081:8081"]
+    depends_on:
+      metadata-db: { condition: service_healthy }
+      connect: { condition: service_healthy }
+    environment:
+      <<: *service-env
+      KAFKA_CONNECT_URL: http://connect:8083
+
+  subscription-service:
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: subscription-service } }
+    ports: ["8082:8082"]
+    depends_on:
+      metadata-db: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    environment:
+      <<: *service-env
+      PUBLICATION_SERVICE_URL: http://publication-service:8081
+
+  apply-service:
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: apply-service } }
+    ports: ["8084:8084"]
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      <<: *service-env
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8082
+      XDB_APPLY_CONCURRENCY: 3
+
+  api-gateway:
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: api-gateway } }
+    ports: ["8080:8080"]
+    environment:
+      PUBLICATION_SERVICE_URL: http://publication-service:8081
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8082
+      APPLY_SERVICE_URL: http://apply-service:8084
+      XDB_UI_ORIGINS: http://localhost:3000,http://localhost:5173
+
+  ui:
+    build: ./ui
+    ports: ["3000:8080"]
+    environment:
+      API_GATEWAY_HOST: api-gateway
+    depends_on: [api-gateway]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports: ["8085:8080"]
+    depends_on: [kafka, connect]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083

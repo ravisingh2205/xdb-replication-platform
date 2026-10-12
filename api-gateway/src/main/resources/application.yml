@@ -1,0 +1,84 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Only used when xdb.security.enabled=true (e.g. Cognito: https://cognito-idp.<region>.amazonaws.com/<pool-id>)
+          issuer-uri: ${XDB_JWT_ISSUER_URI:http://localhost:9999/unused}
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/api/**]':
+            allowed-origins: ${XDB_UI_ORIGINS:http://localhost:5173,http://localhost:3000}
+            allowed-methods: [GET, POST, PUT, DELETE, OPTIONS]
+            allowed-headers: ["*"]
+      default-filters:
+        - name: CircuitBreaker
+          args:
+            name: backend
+        - name: Retry
+          args:
+            retries: 2
+            methods: GET
+            statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE
+            backoff:
+              firstBackoff: 100ms
+              maxBackoff: 1s
+              factor: 2
+      routes:
+        # ---- Publication side ----
+        - id: source-databases
+          uri: ${PUBLICATION_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/source-databases/**,/api/source-databases
+        - id: publications
+          uri: ${PUBLICATION_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/publications/**,/api/publications
+        # ---- Subscription side ----
+        - id: target-databases
+          uri: ${SUBSCRIPTION_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/target-databases/**,/api/target-databases
+        - id: subscriptions
+          uri: ${SUBSCRIPTION_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/subscriptions/**,/api/subscriptions
+        # ---- Monitoring ----
+        - id: apply-status
+          uri: ${APPLY_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/api/apply/**
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      backend:
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+  timelimiter:
+    instances:
+      backend:
+        # Creating a publication waits for Kafka Connect; allow it.
+        timeout-duration: 30s
+
+xdb:
+  security:
+    enabled: ${XDB_SECURITY_ENABLED:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,gateway
+  endpoint:
+    health:
+      probes:
+        enabled: true

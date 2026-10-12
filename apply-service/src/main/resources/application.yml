@@ -1,0 +1,69 @@
+server:
+  port: 8084
+  shutdown: graceful
+
+spring:
+  application:
+    name: apply-service
+  lifecycle:
+    # Let in-flight batches commit (target tx + offsets) before the pod stops.
+    timeout-per-shutdown-phase: 60s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    listener:
+      ack-mode: record
+
+xdb:
+  secrets:
+    # "aws" on EKS: the apply-service reads target passwords from Secrets Manager itself.
+    provider: ${XDB_SECRETS_PROVIDER:none}
+  apply:
+    concurrency: ${XDB_APPLY_CONCURRENCY:3}
+    max-poll-records: ${XDB_APPLY_MAX_POLL_RECORDS:500}
+    credentials: ${XDB_APPLY_CREDENTIALS:remote}
+    subscription-service-url: ${SUBSCRIPTION_SERVICE_URL:http://localhost:8082}
+    internal-token: ${XDB_INTERNAL_TOKEN:local-internal-token}
+    retry-initial-interval: 1s
+    retry-max-interval: 30s
+    data-error-max-elapsed: 2m
+    dlq-replication-factor: ${XDB_DLQ_REPLICATION_FACTOR:1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: aws
+  kafka:
+    security:
+      protocol: SASL_SSL
+    properties:
+      sasl.mechanism: AWS_MSK_IAM
+      sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
+      sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+xdb:
+  secrets:
+    provider: aws
+  apply:
+    credentials: aws
+    dlq-replication-factor: 3

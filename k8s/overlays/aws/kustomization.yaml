@@ -1,0 +1,38 @@
+# AWS (EKS + MSK + RDS) overlay. Values in <> come from `terraform output`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: xdb
+resources:
+  - ../../base
+  - keda-auth.yaml
+
+images:
+  - { name: xdb/publication-service,  newName: <account>.dkr.ecr.<region>.amazonaws.com/xdb/publication-service,  newTag: "1.0.0" }
+  - { name: xdb/subscription-service, newName: <account>.dkr.ecr.<region>.amazonaws.com/xdb/subscription-service, newTag: "1.0.0" }
+  - { name: xdb/apply-service,        newName: <account>.dkr.ecr.<region>.amazonaws.com/xdb/apply-service,        newTag: "1.0.0" }
+  - { name: xdb/api-gateway,          newName: <account>.dkr.ecr.<region>.amazonaws.com/xdb/api-gateway,          newTag: "1.0.0" }
+  - { name: xdb/ui,                   newName: <account>.dkr.ecr.<region>.amazonaws.com/xdb/ui,                   newTag: "1.0.0" }
+  - { name: xdb/kafka-connect,        newName: <account>.dkr.ecr.<region>.amazonaws.com/xdb/kafka-connect,        newTag: "1.0.0" }
+
+patches:
+  - path: config-patch.yaml
+  - path: irsa-patch.yaml
+  - path: connect-msk-patch.yaml
+  - path: ingress-patch.yaml
+  - target: { kind: ScaledObject, name: apply-service }
+    patch: |-
+      - op: replace
+        path: /spec/triggers/0/metadata/bootstrapServers
+        value: <msk_bootstrap_brokers_sasl_iam>
+      - op: add
+        path: /spec/triggers/0/metadata/sasl
+        value: aws_msk_iam
+      - op: add
+        path: /spec/triggers/0/metadata/tls
+        value: enable
+      - op: add
+        path: /spec/triggers/0/metadata/awsRegion
+        value: <region>
+      - op: add
+        path: /spec/triggers/0/authenticationRef
+        value: { name: keda-msk-iam }

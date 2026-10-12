@@ -1,0 +1,8 @@
+# KEDA reads consumer-group lag from MSK using the operator's IRSA role.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-msk-iam
+spec:
+  podIdentity:
+    provider: aws

@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: publication-service
+  annotations:
+    eks.amazonaws.com/role-arn: <irsa_role_arns.publication-service>
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: subscription-service
+  annotations:
+    eks.amazonaws.com/role-arn: <irsa_role_arns.subscription-service>
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apply-service
+  annotations:
+    eks.amazonaws.com/role-arn: <irsa_role_arns.apply-service>
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka-connect
+  annotations:
+    eks.amazonaws.com/role-arn: <irsa_role_arns.kafka-connect>
